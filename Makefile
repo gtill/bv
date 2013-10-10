@@ -4,18 +4,26 @@ CCFLAGS += -Wshadow -Wpointer-arith -Wcast-qual -Wcast-align -Wstrict-prototypes
 .PHONY: all
 all: release
 
+release: CCFLAGS += -Os
 release: um
+	@echo Finished [release]
 
-debug: um
 debug: CCFLAGS += -ggdb -O0
+debug: um
+	@echo Finished [debug]
 
 um: um.o
-	$(CC) $(LDFLAGS) -o um um.o
+	@echo Linking
+	@echo CCFLAGS: $(CCFLAGS)
+	@echo '  [LD] $@'
+	@$(CC) $(LDFLAGS) -o um um.o
 
 %.o: %.c
-	$(CC) $(CCFLAGS) -o $@ -c $<
+	@echo '  [CC] $@'
+	@$(CC) $(CCFLAGS) -o $@ -c $<
 
 .PHONY: clean
 clean:
-	rm -rf um
-	rm -rf *.o
+	@rm -rf um
+	@rm -rf *.o
+	@echo Cleaned up. Done.

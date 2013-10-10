@@ -24,7 +24,7 @@ struct um_id {
 	uint32_t **wid;
 };
 
-static __inline int is_little_endian(void)
+static __inline__ int is_little_endian(void)
 {
 	union {
 		uint32_t i;
@@ -34,7 +34,7 @@ static __inline int is_little_endian(void)
 	return x.c[0] == 1;
 }
 
-static __inline uint32_t bswap32(uint32_t x)
+static __inline__ uint32_t bswap32(uint32_t x)
 {
 	return 0
 		| ((x & 0x000000ff) << 24)
@@ -43,7 +43,7 @@ static __inline uint32_t bswap32(uint32_t x)
 		| ((x & 0xff000000) >> 24);
 }
 
-static __inline uint32_t to_be32(uint32_t x)
+static __inline__ uint32_t to_be32(uint32_t x)
 {
 	return is_little_endian() ? bswap32(x) : x;
 }
@@ -86,7 +86,6 @@ static uint32_t add_wid(struct um_id *um_id, uint32_t *wid)
 		}
 
 		memset(um_id->wid + n, 0x00, sizeof(um_id->wid[0]) * n);
-		fprintf(stderr, "%" PRId32 "\n", um_id->count);
 	}
 
 	for (i = 1; i < um_id->count; ++i) {
@@ -129,6 +128,33 @@ static uint32_t *get_wid(struct um_id *um_id, uint32_t id)
 	return um_id->wid[id];
 }
 
+static int32_t alloc_wid(struct um_id *um_id)
+{
+	um_id->count = kUM_ID_INIT_COUNT + 1;
+	um_id->wid = malloc(um_id->count * sizeof(um_id->wid[0]));
+
+	if (um_id->wid == NULL) {
+		return -1;
+	}
+
+	memset(um_id->wid, 0x00, um_id->count * sizeof(um_id->wid[0]));
+
+	um_id->noccupied = 1;		/* reserve first node */
+
+	return 0;
+}
+
+static void free_wid(struct um_id *um_id)
+{
+	int i;
+
+	for (i = 1; i < um_id->count; ++i) {
+		if (um_id->wid[i] != NULL) {
+			um_free(um_id->wid[i]);
+		}
+	}
+}
+
 static void print_usage(const char *name)
 {
 	fprintf(stderr, "Usage: %s scroll\n", name);
@@ -143,6 +169,7 @@ int main(int argc, char *argv[])
 	uint32_t reg[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 	uint32_t *arr0 = NULL;
 	struct um_id um_id;
+	uint8_t should_stop = 0;
 
 	/* check arguments */
 
@@ -176,24 +203,16 @@ int main(int argc, char *argv[])
 
 	fclose(scroll);
 
-	um_id.count = kUM_ID_INIT_COUNT + 1;
-	um_id.wid = malloc(um_id.count * sizeof(um_id.wid[0]));
-
-	if (um_id.wid == NULL) {
-		fprintf(stderr, "::::| error: no memory\n");
+	if (alloc_wid(&um_id) != 0) {
+		fprintf(stderr, "::::| error: no memory for wid\n");
 		um_free(arr0);
-		return -1;
 	}
-
-	memset(um_id.wid, 0x00, um_id.count * sizeof(um_id.wid[0]));
-
-	um_id.noccupied = 1;	/* reserve first node */
 
 	fp = 0;
 
 	/* UM loop */
 
-	for ( ;; ) {
+	while (should_stop == 0) {
 		uint32_t op_num;
 
 		x = arr0[fp++];
@@ -267,7 +286,9 @@ int main(int argc, char *argv[])
 				 * each quantity is treated treated as an unsigned 32
 				 * bit number.
 				 */
-				if (reg_c(x)) {
+				if (reg_c(x) == 0) {
+					should_stop = 1;
+				} else {
 					reg_a(x) = reg_b(x) / reg_c(x);
 				}
 			} break;
@@ -289,8 +310,7 @@ int main(int argc, char *argv[])
 				 * The universal machine stops computation.
 				 */
 				fprintf(stderr, "HALT\n");
-
-				return 0;
+				should_stop = 1;
 			} break;
 
 			case 8: {
@@ -307,14 +327,14 @@ int main(int argc, char *argv[])
 
 				if (p == NULL) {
 					fprintf(stderr, "::::| error: no memory for um\n");
-					return -1;
+					should_stop = 1;
 				}
 
 				reg_b(x) = add_wid(&um_id, p);
 
 				if (reg_b(x) == 0) {
 					fprintf(stderr, "::::| error: failed to allocate wid\n");
-					return -1;
+					should_stop = 1;
 				}
 			} break;
 
@@ -374,11 +394,12 @@ int main(int argc, char *argv[])
 					um_free(arr0);
 					arr0 = um_alloc(arr->count);
 
-					if (arr0 == NULL) {
+					if (arr0 != NULL) {
+						memcpy(arr0, arr->el, sizeof(x) * arr->count);
+					} else {
 						fprintf(stderr, "::::| error: no memory for zero array\n");
+						should_stop = 1;
 					}
-
-					memcpy(arr0, arr->el, sizeof(x) * arr->count);
 				}
 
 				fp = reg_c(x);
@@ -394,6 +415,10 @@ int main(int argc, char *argv[])
 			} break;
 		}
 	}
+
+	free_wid(&um_id);
+	um_free(arr0);
+	free(um_id.wid);
 
 	return 0;
 }
